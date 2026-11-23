@@ -1,0 +1,100 @@
+local fork = loadstring(game:HttpGet("https://raw.githubusercontent.com/Tr4c3rz/fork/refs/heads/main/forkUI"))()
+
+local Window = fork:CreateWindow({
+    Name = "fork | Example",
+    SettingsIcon = "rbxassetid://4483345998",
+    Size = UDim2.fromOffset(650, 420),
+    Theme = {
+        Background = Color3.fromRGB(12, 13, 18),
+        Secondary = Color3.fromRGB(19, 21, 29),
+        Tertiary = Color3.fromRGB(29, 32, 43),
+        Accent = Color3.fromRGB(125, 95, 255),
+        Text = Color3.fromRGB(245, 245, 250),
+        Muted = Color3.fromRGB(150, 153, 168),
+        Border = Color3.fromRGB(48, 51, 65),
+    }
+})
+
+local MainTab = Window:CreateTab({
+    Name = "Main",
+    Icon = "rbxassetid://4483345998",
+})
+
+local General = MainTab:CreateSection("General")
+
+General:CreateButton({
+    Name = "Print message",
+    ButtonText = "Click",
+    Callback = function()
+        print("Hello from fork!")
+        Window:Notify({
+            Title = "fork",
+            Content = "Button clicked successfully.",
+            Type = "success",
+            Duration = 3,
+        })
+    end,
+})
+
+General:CreateToggle({
+    Name = "Example toggle",
+    Default = false,
+    Callback = function(value)
+        print("Toggle:", value)
+    end,
+})
+
+General:CreateDivider()
+
+General:CreateSlider({
+    Name = "WalkSpeed value",
+    Min = 0,
+    Max = 100,
+    Default = 16,
+    Callback = function(value)
+        print("Slider:", value)
+    end,
+})
+
+General:CreateDropdown({
+    Name = "Choose option",
+    Options = {"Option 1", "Option 2", "Option 3"},
+    Default = "Option 1",
+    Callback = function(value)
+        print("Selected:", value)
+    end,
+})
+
+General:CreateDivider("Inputs")
+
+General:CreateTextbox({
+    Name = "Your name",
+    Placeholder = "Type here...",
+    Callback = function(text, enterPressed)
+        print("Textbox:", text, "Enter:", enterPressed)
+    end,
+})
+
+General:CreateKeybind({
+    Name = "Test keybind",
+    Default = Enum.KeyCode.RightShift,
+    Callback = function(key)
+        Window:Toggle()
+    end,
+})
+
+General:CreateDivider("Info")
+
+General:CreateLabel("This is a label")
+
+General:CreateParagraph({
+    Title = "Paragraph",
+    Content = "Longer text goes here and wraps onto multiple lines when it runs out of room.",
+})
+
+Window:Notify({
+    Title = "Heads up",
+    Content = "This is a warning notification.",
+    Type = "warning",
+    Duration = 4,
+})
