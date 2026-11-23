@@ -1470,6 +1470,88 @@ function Library:CreateWindow(options)
                 return api
             end
 
+            local function makeCard(topBottom)
+                local card = create("Frame", {
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundColor3 = theme.Tertiary,
+                    BorderSizePixel = 0,
+                }, section)
+                corner(card, 6)
+                padding(card, 10, 10, topBottom, topBottom)
+                create("UISizeConstraint", {MinSize = Vector2.new(0, 30)}, card)
+                return card
+            end
+
+            local function makeWrapLabel(parent, text, size, color, font)
+                local label = makeLabel(parent, text, size, color, font)
+                label.Size = UDim2.new(1, 0, 0, 0)
+                label.AutomaticSize = Enum.AutomaticSize.Y
+                label.TextWrapped = true
+                label.TextYAlignment = Enum.TextYAlignment.Top
+                return label
+            end
+
+            function sectionApi:CreateLabel(config)
+                if type(config) ~= "table" then
+                    config = {Text = config}
+                end
+                local card = makeCard(8)
+                local label = makeWrapLabel(card, tostring(config.Text or config.Name or ""), 12, config.Color or theme.Text, Enum.Font.GothamMedium)
+                local api = {}
+                function api:Set(text) label.Text = tostring(text or "") end
+                function api:Get() return label.Text end
+                return api
+            end
+
+            function sectionApi:CreateParagraph(config, content)
+                if type(config) ~= "table" then
+                    config = {Title = config, Content = content}
+                end
+                local card = makeCard(9)
+                create("UIListLayout", {
+                    Padding = UDim.new(0, 4),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }, card)
+                local title = makeWrapLabel(card, tostring(config.Title or config.Name or ""), 12, theme.Text, Enum.Font.GothamBold)
+                title.LayoutOrder = 1
+                local body = makeWrapLabel(card, tostring(config.Content or config.Text or ""), 11, theme.Muted)
+                body.LayoutOrder = 2
+                local api = {}
+                function api:SetTitle(text) title.Text = tostring(text or "") end
+                function api:SetContent(text) body.Text = tostring(text or "") end
+                function api:Set(newTitle, newContent)
+                    if newTitle ~= nil then title.Text = tostring(newTitle) end
+                    if newContent ~= nil then body.Text = tostring(newContent) end
+                end
+                return api
+            end
+
+            function sectionApi:CreateDivider(name)
+                local hasName = type(name) == "string" and name ~= ""
+                local row = makeRow(hasName and 18 or 10)
+                local line = create("Frame", {
+                    Name = "Divider",
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.new(1, 0, 0, 1),
+                    BackgroundColor3 = theme.Border,
+                    BorderSizePixel = 0,
+                }, row)
+                if hasName then
+                    local label = makeLabel(row, name, 11, theme.Muted, Enum.Font.GothamBold)
+                    local function fit()
+                        local width = label.TextBounds.X + 8
+                        line.Position = UDim2.new(0, width, 0.5, 0)
+                        line.Size = UDim2.new(1, -width, 0, 1)
+                    end
+                    label.ZIndex = 2
+                    fit()
+                    label:GetPropertyChangedSignal("TextBounds"):Connect(fit)
+                end
+                return row
+            end
+
             return sectionApi
         end
 
