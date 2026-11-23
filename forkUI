@@ -16,11 +16,12 @@ local UserInputService = getService("UserInputService")
 local Workspace = getService("Workspace")
 local HttpService = getService("HttpService")
 local RunService = getService("RunService")
+local GuiService = getService("GuiService")
 
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.6.0"
+Library.Version = "0.7.0"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -489,7 +490,34 @@ function Library:CreateWindow(options)
     local searchEnabled = options.SearchBar ~= false
     local pageTop = searchEnabled and 40 or 0
     local searchBox
+    local searchHolder
+    local searchShown = true
+    window.DetachEnabled = options.Detachable ~= false
     if searchEnabled then
+        searchHolder = create("Frame", {
+            Name = "SearchHolder",
+            Size = UDim2.new(1, 0, 0, 44),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 3,
+        }, content)
+        local backdrop = create("Frame", {
+            Name = "SearchBackdrop",
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = theme.Background,
+            BackgroundTransparency = window.Opacity,
+            BorderSizePixel = 0,
+            ZIndex = 3,
+        }, searchHolder)
+        surface(backdrop)
+        create("UIGradient", {
+            Rotation = 90,
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0),
+                NumberSequenceKeypoint.new(0.7, 0.1),
+                NumberSequenceKeypoint.new(1, 1),
+            }),
+        }, backdrop)
         searchBox = create("TextBox", {
             Name = "Search",
             Position = UDim2.new(0, 16, 0, 8),
@@ -503,12 +531,45 @@ function Library:CreateWindow(options)
             Font = Enum.Font.Gotham,
             TextXAlignment = Enum.TextXAlignment.Left,
             ClearTextOnFocus = false,
-            ZIndex = 3,
-        }, content)
+            ZIndex = 4,
+        }, searchHolder)
         corner(searchBox, 6)
         padding(searchBox, 10, 10, 0, 0)
         stroke(searchBox, theme.Border, 0.45)
         focusFx(searchBox, theme.Accent)
+    end
+
+    local function setSearchVisible(state)
+        if not searchHolder or searchShown == state then return end
+        searchShown = state
+        tween(searchHolder, 0.25, {Position = UDim2.new(0, 0, 0, state and 0 or -48)})
+    end
+
+    local floatingRoot
+    local function getFloatingRoot()
+        if not floatingRoot then
+            floatingRoot = create("Frame", {
+                Name = "Floating",
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                ZIndex = 10,
+            }, screenGui)
+        end
+        return floatingRoot
+    end
+
+    local function guiOffsetY(pointer, object)
+        local inset = GuiService and GuiService:GetGuiInset().Y or 0
+        if inset ~= 0 then
+            local top = object.AbsolutePosition.Y
+            local bottom = top + object.AbsoluteSize.Y
+            local shifted = pointer.Y + inset
+            if shifted >= top - 2 and shifted <= bottom + 2 then
+                return inset
+            end
+        end
+        return 0
     end
 
     local function applySearch()
@@ -806,6 +867,12 @@ function Library:CreateWindow(options)
         local notifications = screenGui:FindFirstChild("Notifications")
         if notifications then
             for _, descendant in ipairs(notifications:GetDescendants()) do
+                table.insert(targets, descendant)
+            end
+        end
+        local floatingSections = screenGui:FindFirstChild("Floating")
+        if floatingSections then
+            for _, descendant in ipairs(floatingSections:GetDescendants()) do
                 table.insert(targets, descendant)
             end
         end
@@ -1342,8 +1409,7 @@ function Library:CreateWindow(options)
 
         local page = create("ScrollingFrame", {
             Name = tabName .. "Page",
-            Position = UDim2.fromOffset(0, pageTop),
-            Size = UDim2.new(1, 0, 1, -pageTop),
+            Size = UDim2.fromScale(1, 1),
             BackgroundColor3 = theme.Background,
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
@@ -1353,7 +1419,34 @@ function Library:CreateWindow(options)
             ScrollBarThickness = 3,
             ScrollBarImageColor3 = theme.Accent,
         }, content)
-        padding(page, 16, 16, 15, 15)
+        padding(page, 16, 16, 15 + pageTop, 15)
+
+        local lastScroll = 0
+        local scrollAccum = 0
+        page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            if not searchHolder then return end
+            local y = page.CanvasPosition.Y
+            local delta = y - lastScroll
+            lastScroll = y
+            if y <= 4 then
+                scrollAccum = 0
+                setSearchVisible(true)
+                return
+            end
+            if (delta > 0) ~= (scrollAccum > 0) then
+                scrollAccum = 0
+            end
+            scrollAccum = scrollAccum + delta
+            if scrollAccum > 24 then
+                scrollAccum = 0
+                if not searchBox:IsFocused() and searchBox.Text == "" then
+                    setSearchVisible(false)
+                end
+            elseif scrollAccum < -24 then
+                scrollAccum = 0
+                setSearchVisible(true)
+            end
+        end)
 
         local pageLayout = create("UIListLayout", {
             Padding = UDim.new(0, 12),
@@ -1388,8 +1481,9 @@ function Library:CreateWindow(options)
                 end
             end
             page.Visible = true
-            page.Position = UDim2.fromOffset(16, pageTop)
-            tween(page, 0.32, {Position = UDim2.fromOffset(0, pageTop)})
+            page.Position = UDim2.fromOffset(16, 0)
+            tween(page, 0.32, {Position = UDim2.fromOffset(0, 0)})
+            setSearchVisible(true)
             tween(tabButton, 0.18, {
                 BackgroundTransparency = 0,
                 BackgroundColor3 = theme.Tertiary,
@@ -1424,8 +1518,11 @@ function Library:CreateWindow(options)
                 sectionName = sectionConfig.Name
             end
             sectionConfig = sectionConfig or {}
+            tab._sectionCounter = (tab._sectionCounter or 0) + 1
+            local sectionOrder = tab._sectionCounter
             local section = create("Frame", {
                 Name = sectionName or "Section",
+                LayoutOrder = sectionOrder,
                 Size = UDim2.new(1, 0, 0, 40),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundColor3 = theme.Secondary,
@@ -1470,16 +1567,6 @@ function Library:CreateWindow(options)
 
             if collapsible then
                 arrow = chevron(heading, theme.Muted)
-                local toggleButton = create("TextButton", {
-                    Name = "CollapseToggle",
-                    Size = UDim2.fromScale(1, 1),
-                    BackgroundTransparency = 1,
-                    Text = "",
-                    ZIndex = 3,
-                }, heading)
-                toggleButton.MouseButton1Click:Connect(function()
-                    setCollapsed(not collapsed)
-                end)
             end
 
             setCollapsed = function(state)
@@ -1525,6 +1612,194 @@ function Library:CreateWindow(options)
                 arrow.Rotation = -90
             end
 
+            local detachable = window.DetachEnabled and sectionConfig.Detachable ~= false
+            local floating = false
+            local placeholder, placeholderStroke, holder, dockButton
+            local grabOffset = Vector2.new(0, 0)
+            local floatWidth = tonumber(options.DetachedWidth) or 270
+            local dragState
+
+            local function toGui(position, insetY)
+                return Vector2.new(position.X, position.Y + insetY)
+            end
+
+            local function overWindow(point)
+                if not isOpen then return false end
+                local origin = main.AbsolutePosition
+                local size = main.AbsoluteSize
+                return point.X >= origin.X and point.X <= origin.X + size.X
+                    and point.Y >= origin.Y and point.Y <= origin.Y + size.Y
+            end
+
+            local function dock()
+                if not floating then return end
+                floating = false
+                section.Parent = page
+                section.LayoutOrder = sectionOrder
+                if placeholder then
+                    placeholder:Destroy()
+                    placeholder = nil
+                    placeholderStroke = nil
+                end
+                if holder then
+                    holder:Destroy()
+                    holder = nil
+                end
+                if dockButton then
+                    dockButton.Visible = false
+                end
+                if window.CurrentTab ~= tab then
+                    selectTab()
+                end
+            end
+
+            local function detach(point)
+                if floating then return end
+                floating = true
+                local absolute = section.AbsolutePosition
+                grabOffset = Vector2.new(
+                    math.clamp(point.X - absolute.X, 24, floatWidth - 24),
+                    math.clamp(point.Y - absolute.Y, 8, 24)
+                )
+                placeholder = create("Frame", {
+                    Name = "DetachedPlaceholder",
+                    Size = UDim2.new(1, 0, 0, 34),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    LayoutOrder = sectionOrder,
+                }, page)
+                corner(placeholder, 9)
+                placeholderStroke = stroke(placeholder, theme.Border, 0.2)
+                local placeholderLabel = makeLabel(placeholder, (sectionName or "Section") .. "  -  drag back here to dock", 10, theme.Muted)
+                placeholderLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+                holder = create("Frame", {
+                    Name = (sectionName or "Section") .. "Detached",
+                    Position = UDim2.fromOffset(point.X - grabOffset.X, point.Y - grabOffset.Y),
+                    Size = UDim2.fromOffset(floatWidth, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                }, getFloatingRoot())
+                local popScale = create("UIScale", {Scale = 0.94}, holder)
+                tween(popScale, 0.25, {Scale = 1}, Enum.EasingStyle.Back)
+                section.Parent = holder
+                if dockButton then
+                    dockButton.Visible = true
+                end
+            end
+
+            local function moveHolder(point)
+                if not holder then return end
+                local viewport = screenGui.AbsoluteSize
+                holder.Position = UDim2.fromOffset(
+                    math.clamp(point.X - grabOffset.X, 0, math.max(viewport.X - 80, 0)),
+                    math.clamp(point.Y - grabOffset.Y, 0, math.max(viewport.Y - 30, 0))
+                )
+            end
+
+            local function highlight(over)
+                if placeholderStroke then
+                    tween(placeholderStroke, 0.12, {Color = over and theme.Accent or theme.Border})
+                end
+            end
+
+            if collapsible or detachable then
+                local handle = create("TextButton", {
+                    Name = "HeaderHandle",
+                    Size = UDim2.fromScale(1, 1),
+                    BackgroundTransparency = 1,
+                    Text = "",
+                    ZIndex = 3,
+                }, heading)
+
+                if detachable then
+                    dockButton = create("TextButton", {
+                        Name = "DockButton",
+                        AnchorPoint = Vector2.new(1, 0.5),
+                        Position = UDim2.new(1, collapsible and -28 or -4, 0.5, 0),
+                        Size = UDim2.fromOffset(34, 16),
+                        BackgroundColor3 = theme.Tertiary,
+                        Text = "dock",
+                        TextColor3 = theme.Muted,
+                        TextSize = 9,
+                        Font = Enum.Font.GothamMedium,
+                        AutoButtonColor = false,
+                        Visible = false,
+                        ZIndex = 4,
+                    }, heading)
+                    corner(dockButton, 5)
+                    hoverFx(dockButton, function() return theme.Tertiary end)
+                    dockButton.MouseButton1Click:Connect(dock)
+                end
+
+                handle.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1
+                        or input.UserInputType == Enum.UserInputType.Touch then
+                        dragState = {
+                            start = input.Position,
+                            insetY = guiOffsetY(input.Position, heading),
+                            moved = false,
+                            scrolled = false,
+                        }
+                    end
+                end)
+
+                connect(UserInputService.InputChanged, function(input)
+                    if not dragState then return end
+                    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+                        and input.UserInputType ~= Enum.UserInputType.Touch then
+                        return
+                    end
+                    local delta = input.Position - dragState.start
+                    if delta.Magnitude >= 10 then
+                        dragState.scrolled = true
+                    end
+                    if not detachable then return end
+                    if not dragState.moved then
+                        if delta.Magnitude < 10 then return end
+                        dragState.moved = true
+                        local startPoint = toGui(input.Position, dragState.insetY)
+                        if floating and holder then
+                            local origin = holder.AbsolutePosition
+                            grabOffset = Vector2.new(
+                                math.clamp(startPoint.X - origin.X, 0, floatWidth),
+                                math.clamp(startPoint.Y - origin.Y, 0, 40)
+                            )
+                        else
+                            detach(startPoint)
+                        end
+                        page.ScrollingEnabled = false
+                    end
+                    local point = toGui(input.Position, dragState.insetY)
+                    moveHolder(point)
+                    highlight(overWindow(point))
+                end)
+
+                connect(UserInputService.InputEnded, function(input)
+                    if not dragState then return end
+                    if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                        and input.UserInputType ~= Enum.UserInputType.Touch then
+                        return
+                    end
+                    local state = dragState
+                    dragState = nil
+                    page.ScrollingEnabled = true
+                    if not state.scrolled then
+                        setCollapsed(not collapsed)
+                        return
+                    end
+                    if state.moved then
+                        local point = toGui(input.Position, state.insetY)
+                        if overWindow(point) then
+                            dock()
+                        else
+                            highlight(false)
+                        end
+                    end
+                end)
+            end
+
             local sectionApi = {}
 
             function sectionApi:SetCollapsed(state)
@@ -1533,6 +1808,14 @@ function Library:CreateWindow(options)
 
             function sectionApi:IsCollapsed()
                 return collapsed
+            end
+
+            function sectionApi:Dock()
+                dock()
+            end
+
+            function sectionApi:IsDetached()
+                return floating
             end
 
             local function registerFlag(kind, config, getter, setter)
