@@ -3,6 +3,8 @@ local fork = loadstring(game:HttpGet("https://raw.githubusercontent.com/Tr4c3rz/
 local Window = fork:CreateWindow({
     Name = "fork | Example",
     SettingsIcon = "rbxassetid://4483345998",
+    Watermark = true,
+    Blur = 8,
     Size = UDim2.fromOffset(650, 420),
     Theme = {
         Background = Color3.fromRGB(12, 13, 18),
@@ -92,9 +94,32 @@ General:CreateParagraph({
     Content = "Longer text goes here and wraps onto multiple lines when it runs out of room.",
 })
 
+General:CreateImage({
+    Image = "rbxassetid://4483345998",
+    Height = 100,
+    ScaleType = "Fit",
+})
+
+local Advanced = MainTab:CreateSection({
+    Name = "Advanced",
+    Collapsed = true,
+})
+
+Advanced:CreateLabel("Click the section title to collapse or expand it.")
+
 Window:Notify({
     Title = "Heads up",
     Content = "This is a warning notification.",
     Type = "warning",
     Duration = 4,
+})
+
+local MySettings = Window.SettingsTab:CreateSection("My Script")
+
+MySettings:CreateToggle({
+    Name = "Show extra info",
+    Default = false,
+    Callback = function(value)
+        print("Show extra info:", value)
+    end,
 })
