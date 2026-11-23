@@ -19,7 +19,7 @@ local HttpService = getService("HttpService")
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.4.1"
+Library.Version = "0.4.2"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -752,7 +752,12 @@ function Library:CreateWindow(options)
     end
 
     window.Flags = {}
-    local configFolder = tostring(options.Folder or "fork")
+    local function folderSafe(text)
+        local cleaned = tostring(text or ""):gsub("[^%w%-%_]", "_")
+        return cleaned
+    end
+    local scriptId = tostring(options.Folder or options.Name or "default")
+    local configFolder = options.Folder and tostring(options.Folder) or ("fork/" .. folderSafe(options.Name or "default"))
     local configDirectory = configFolder .. "/configs"
     local autoloadPath = configFolder .. "/autoload.txt"
     local memoryConfigs = {}
@@ -766,7 +771,13 @@ function Library:CreateWindow(options)
 
     local function ensureFolders()
         if typeof(makefolder) ~= "function" then return end
-        for _, path in ipairs({configFolder, configDirectory}) do
+        local paths = {}
+        local built
+        for part in string.gmatch(configDirectory, "[^/]+") do
+            built = built and (built .. "/" .. part) or part
+            table.insert(paths, built)
+        end
+        for _, path in ipairs(paths) do
             local exists = false
             if typeof(isfolder) == "function" then
                 local ok, result = pcall(isfolder, path)
@@ -803,6 +814,7 @@ function Library:CreateWindow(options)
         end
         return {
             Version = 1,
+            Script = scriptId,
             Theme = themeData,
             Appearance = {
                 Opacity = window.Opacity,
@@ -891,6 +903,9 @@ function Library:CreateWindow(options)
         end
         local okDecode, data = pcall(HttpService.JSONDecode, HttpService, raw)
         if not okDecode or type(data) ~= "table" then return false, "Config file is corrupted" end
+        if data.Script ~= nil and tostring(data.Script) ~= scriptId then
+            return false, "Config belongs to a different script"
+        end
         applyConfig(data)
         return true
     end
