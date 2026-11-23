@@ -19,7 +19,7 @@ local HttpService = getService("HttpService")
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.4.0"
+Library.Version = "0.4.1"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -468,7 +468,7 @@ function Library:CreateWindow(options)
     local mobileNavExpanded = false
     local introPlaying = options.OpenOnCreate ~= false
     local layoutReady = false
-    window.SizeScale = 1
+    window.SizeScale = math.clamp(tonumber(options.UISize) or 80, 60, 120) / 100
 
     local function computeMainSize()
         local amount = window.SizeScale
@@ -485,6 +485,35 @@ function Library:CreateWindow(options)
         else
             for property, value in pairs(properties) do
                 object[property] = value
+            end
+        end
+    end
+
+    local function styleTab(tab, collapsed)
+        local button = tab.Button
+        local icon = tab.IconImage
+        if collapsed then
+            button.Text = icon and "" or string.upper(string.sub(tab.Name, 1, 1))
+            button.TextXAlignment = Enum.TextXAlignment.Center
+            button.TextSize = 14
+            tab.Padding.PaddingLeft = UDim.new(0, 0)
+            tab.Padding.PaddingRight = UDim.new(0, 0)
+            tab.Indicator.Position = UDim2.new(0, 0, 0.5, 0)
+            if icon then
+                icon.AnchorPoint = Vector2.new(0.5, 0.5)
+                icon.Position = UDim2.new(0.5, 0, 0.5, 0)
+            end
+        else
+            local left = icon and 36 or 10
+            button.Text = tab.Name
+            button.TextXAlignment = Enum.TextXAlignment.Left
+            button.TextSize = 12
+            tab.Padding.PaddingLeft = UDim.new(0, left)
+            tab.Padding.PaddingRight = UDim.new(0, 6)
+            tab.Indicator.Position = UDim2.new(0, -left, 0.5, 0)
+            if icon then
+                icon.AnchorPoint = Vector2.new(0, 0.5)
+                icon.Position = UDim2.new(0, -26, 0.5, 0)
             end
         end
     end
@@ -507,9 +536,7 @@ function Library:CreateWindow(options)
             tabList.ScrollBarThickness = 2
             navToggle.Visible = true
             for _, tab in ipairs(window.Tabs) do
-                tab.Button.Text = mobileNavExpanded and ((tab.Icon and (tab.Icon .. "  ") or "") .. tab.Name) or (tab.Icon or "•")
-                tab.Button.TextXAlignment = mobileNavExpanded and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
-                tab.Button.TextSize = mobileNavExpanded and 11 or 19
+                styleTab(tab, not mobileNavExpanded)
             end
         else
             local pad = UDim.new(0, 10)
@@ -522,9 +549,7 @@ function Library:CreateWindow(options)
             tabList.ScrollBarThickness = 3
             navToggle.Visible = false
             for _, tab in ipairs(window.Tabs) do
-                tab.Button.Text = (tab.Icon and (tab.Icon .. "   ") or "") .. tab.Name
-                tab.Button.TextXAlignment = Enum.TextXAlignment.Left
-                tab.Button.TextSize = 12
+                styleTab(tab, false)
             end
         end
         if not introPlaying then
@@ -689,6 +714,9 @@ function Library:CreateWindow(options)
         reopen.TextColor3 = theme.Accent
         for _, tab in ipairs(window.Tabs) do
             tab.Page.ScrollBarImageColor3 = theme.Accent
+            if tab.IconImage then
+                tab.IconImage.ImageColor3 = tab == window.CurrentTab and theme.Text or theme.Muted
+            end
         end
     end
 
@@ -994,16 +1022,16 @@ function Library:CreateWindow(options)
         if not holder then
             holder = create("Frame", {
                 Name = "Notifications",
-                AnchorPoint = Vector2.new(1, 1),
-                Position = UDim2.new(1, -12, 1, UserInputService.TouchEnabled and -110 or -22),
-                Size = UDim2.fromOffset(280, 400),
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -12, 0, 46),
+                Size = UDim2.fromOffset(190, 300),
                 BackgroundTransparency = 1,
                 ZIndex = 20,
             }, screenGui)
             create("UIListLayout", {
-                VerticalAlignment = Enum.VerticalAlignment.Bottom,
+                VerticalAlignment = Enum.VerticalAlignment.Top,
                 HorizontalAlignment = Enum.HorizontalAlignment.Right,
-                Padding = UDim.new(0, 8),
+                Padding = UDim.new(0, 5),
                 SortOrder = Enum.SortOrder.LayoutOrder,
             }, holder)
         end
@@ -1019,13 +1047,13 @@ function Library:CreateWindow(options)
         end
 
         local wrapper = create("Frame", {
-            Size = UDim2.fromOffset(270, 0),
+            Size = UDim2.fromOffset(180, 0),
             BackgroundTransparency = 1,
             ZIndex = 21,
         }, holder)
         local card = create("Frame", {
-            Position = UDim2.fromOffset(300, 0),
-            Size = UDim2.fromOffset(260, 78),
+            Position = UDim2.fromOffset(200, 0),
+            Size = UDim2.fromOffset(173, 52),
             BackgroundColor3 = theme.Secondary,
             BackgroundTransparency = window.Opacity,
             BorderSizePixel = 0,
@@ -1033,26 +1061,27 @@ function Library:CreateWindow(options)
             ZIndex = 21,
         }, wrapper)
         surface(card)
-        corner(card, 9)
+        corner(card, 7)
         stroke(card, theme.Border)
         create("Frame", {
-            Size = UDim2.new(0, 3, 1, 0),
+            Size = UDim2.new(0, 2, 1, 0),
             BackgroundColor3 = notificationAccent,
             BorderSizePixel = 0,
             ZIndex = 22,
         }, card)
-        local heading = makeLabel(card, config.Title or "Notification", 13, theme.Text, Enum.Font.GothamBold)
-        heading.Position = UDim2.fromOffset(13, 8)
-        heading.Size = UDim2.new(1, -25, 0, 20)
+        local heading = makeLabel(card, config.Title or "Notification", 10, theme.Text, Enum.Font.GothamBold)
+        heading.Position = UDim2.fromOffset(9, 5)
+        heading.Size = UDim2.new(1, -17, 0, 14)
         heading.ZIndex = 22
-        local body = makeLabel(card, config.Content or config.Description or "", 11, theme.Muted)
-        body.Position = UDim2.fromOffset(13, 30)
-        body.Size = UDim2.new(1, -25, 0, 34)
+        local body = makeLabel(card, config.Content or config.Description or "", 9, theme.Muted)
+        body.Position = UDim2.fromOffset(9, 20)
+        body.Size = UDim2.new(1, -17, 0, 26)
+        body.TextYAlignment = Enum.TextYAlignment.Top
         body.TextWrapped = true
         body.ZIndex = 22
         local timerTrack = create("Frame", {
-            Position = UDim2.new(0, 0, 1, -3),
-            Size = UDim2.new(1, 0, 0, 3),
+            Position = UDim2.new(0, 0, 1, -2),
+            Size = UDim2.new(1, 0, 0, 2),
             BackgroundColor3 = theme.Tertiary,
             BorderSizePixel = 0,
             ZIndex = 23,
@@ -1068,25 +1097,15 @@ function Library:CreateWindow(options)
         local function dismiss()
             if dismissed then return end
             dismissed = true
-            tween(card, 0.25, {Position = UDim2.fromOffset(300, 0)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+            tween(card, 0.25, {Position = UDim2.fromOffset(200, 0)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
             task.wait(0.22)
             if not wrapper.Parent then return end
-            tween(wrapper, 0.2, {Size = UDim2.fromOffset(270, 0)})
+            tween(wrapper, 0.2, {Size = UDim2.fromOffset(180, 0)})
             task.wait(0.22)
             if wrapper.Parent then wrapper:Destroy() end
         end
 
-        local hit = create("TextButton", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            Text = "",
-            ZIndex = 25,
-        }, card)
-        hit.MouseButton1Click:Connect(function()
-            task.spawn(dismiss)
-        end)
-
-        tween(wrapper, 0.25, {Size = UDim2.fromOffset(270, 78)})
+        tween(wrapper, 0.25, {Size = UDim2.fromOffset(180, 52)})
         tween(card, 0.4, {Position = UDim2.fromOffset(0, 0)}, Enum.EasingStyle.Back)
         tween(timerFill, duration, {Size = UDim2.new(0, 0, 1, 0)}, Enum.EasingStyle.Linear)
         task.delay(duration, dismiss)
@@ -1111,7 +1130,7 @@ function Library:CreateWindow(options)
             Size = UDim2.new(1, 0, 0, 34),
             BackgroundColor3 = theme.Tertiary,
             BackgroundTransparency = 1,
-            Text = (tabOptions.Icon and (tabOptions.Icon .. "   ") or "") .. tabName,
+            Text = tabName,
             TextColor3 = theme.Muted,
             TextSize = 12,
             Font = Enum.Font.GothamMedium,
@@ -1120,6 +1139,20 @@ function Library:CreateWindow(options)
         }, tabList)
         corner(tabButton, 7)
         padding(tabButton, 10, 6, 0, 0)
+        local tabPadding = tabButton:FindFirstChildOfClass("UIPadding")
+
+        local iconImage
+        if tabOptions.Icon then
+            iconImage = create("ImageLabel", {
+                Name = "TabIcon",
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, -26, 0.5, 0),
+                Size = UDim2.fromOffset(16, 16),
+                BackgroundTransparency = 1,
+                Image = resolveImage(tabOptions.Icon),
+                ImageColor3 = theme.Muted,
+            }, tabButton)
+        end
 
         local indicator = create("Frame", {
             Name = "Indicator",
@@ -1153,6 +1186,8 @@ function Library:CreateWindow(options)
         local tab = {
             Name = tabName,
             Icon = tabOptions.Icon,
+            IconImage = iconImage,
+            Padding = tabPadding,
             Button = tabButton,
             Page = page,
             Layout = pageLayout,
@@ -1170,6 +1205,9 @@ function Library:CreateWindow(options)
                         TextColor3 = theme.Muted,
                     })
                     tween(other.Indicator, 0.2, {Size = UDim2.fromOffset(3, 0)})
+                    if other.IconImage then
+                        tween(other.IconImage, 0.18, {ImageColor3 = theme.Muted})
+                    end
                 end
             end
             page.Visible = true
@@ -1181,17 +1219,22 @@ function Library:CreateWindow(options)
                 TextColor3 = theme.Text,
             })
             tween(indicator, 0.3, {Size = UDim2.fromOffset(3, 16)}, Enum.EasingStyle.Back)
+            if iconImage then
+                tween(iconImage, 0.18, {ImageColor3 = theme.Text})
+            end
             window.CurrentTab = tab
         end
 
         tabButton.MouseEnter:Connect(function()
             if window.CurrentTab ~= tab then
                 tween(tabButton, 0.15, {BackgroundTransparency = 0.6, TextColor3 = theme.Text})
+                if iconImage then tween(iconImage, 0.15, {ImageColor3 = theme.Text}) end
             end
         end)
         tabButton.MouseLeave:Connect(function()
             if window.CurrentTab ~= tab then
                 tween(tabButton, 0.18, {BackgroundTransparency = 1, TextColor3 = theme.Muted})
+                if iconImage then tween(iconImage, 0.18, {ImageColor3 = theme.Muted}) end
             end
         end)
 
@@ -1834,7 +1877,7 @@ function Library:CreateWindow(options)
         if not window._settingsCreated and tabName ~= "Settings" then
             window._settingsCreated = true
             window._noFlags = true
-            local settingsTab = window:CreateTab({Name = "Settings", Icon = "⚙"})
+            local settingsTab = window:CreateTab({Name = "Settings", Icon = options.SettingsIcon})
             local appearance = settingsTab:CreateSection("Appearance")
 
             appearance:CreateDropdown({
@@ -1953,7 +1996,7 @@ function Library:CreateWindow(options)
                 Name = "UI size",
                 Min = 60,
                 Max = 120,
-                Default = 100,
+                Default = math.floor(window.SizeScale * 100 + 0.5),
                 Callback = function(value)
                     window:SetSize(value)
                 end,
@@ -2077,8 +2120,8 @@ function Library:CreateWindow(options)
             })
             refreshConfigs()
             window._noFlags = false
-            applyResponsiveLayout()
         end
+        applyResponsiveLayout()
         return tab
     end
 
