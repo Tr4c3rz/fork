@@ -14,11 +14,12 @@ local Players = getService("Players")
 local TweenService = getService("TweenService")
 local UserInputService = getService("UserInputService")
 local Workspace = getService("Workspace")
+local HttpService = getService("HttpService")
 
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.3.1"
+Library.Version = "0.4.0"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -205,6 +206,25 @@ local function resolveImage(asset)
         end
     end
     return "rbxassetid://" .. image
+end
+
+local function colorToTable(color)
+    return {
+        math.floor(color.R * 255 + 0.5),
+        math.floor(color.G * 255 + 0.5),
+        math.floor(color.B * 255 + 0.5),
+    }
+end
+
+local function tableToColor(value)
+    if type(value) == "table" and tonumber(value[1]) and tonumber(value[2]) and tonumber(value[3]) then
+        return Color3.fromRGB(
+            math.clamp(value[1], 0, 255),
+            math.clamp(value[2], 0, 255),
+            math.clamp(value[3], 0, 255)
+        )
+    end
+    return nil
 end
 
 local function mergeTheme(custom)
@@ -613,7 +633,15 @@ function Library:CreateWindow(options)
             end
         end
 
-        for _, descendant in ipairs(main:GetDescendants()) do
+        local targets = main:GetDescendants()
+        local notifications = screenGui:FindFirstChild("Notifications")
+        if notifications then
+            for _, descendant in ipairs(notifications:GetDescendants()) do
+                table.insert(targets, descendant)
+            end
+        end
+
+        for _, descendant in ipairs(targets) do
             if descendant:IsA("GuiObject") then
                 if descendant.BackgroundColor3 == previous.Accent then
                     descendant.BackgroundColor3 = theme.Accent
@@ -695,44 +723,259 @@ function Library:CreateWindow(options)
         end
     end
 
-    window.SavedThemes = {}
+    window.Flags = {}
+    local configFolder = tostring(options.Folder or "fork")
+    local configDirectory = configFolder .. "/configs"
+    local autoloadPath = configFolder .. "/autoload.txt"
+    local memoryConfigs = {}
+    local memoryAutoload = nil
 
-    function window:SaveTheme(name)
-        name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if name == "" then return false, "Theme name is required" end
-        local snapshot = {}
-        for key, value in pairs(theme) do snapshot[key] = value end
-        self.SavedThemes[name] = snapshot
+    local function fileSupport()
+        return typeof(writefile) == "function"
+            and typeof(readfile) == "function"
+            and typeof(isfile) == "function"
+    end
+
+    local function ensureFolders()
+        if typeof(makefolder) ~= "function" then return end
+        for _, path in ipairs({configFolder, configDirectory}) do
+            local exists = false
+            if typeof(isfolder) == "function" then
+                local ok, result = pcall(isfolder, path)
+                exists = ok and result == true
+            end
+            if not exists then
+                pcall(makefolder, path)
+            end
+        end
+    end
+
+    local function cleanName(name)
+        local cleaned = tostring(name or ""):gsub("[^%w%s%-%_%.]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        return cleaned
+    end
+
+    local function configPath(name)
+        return configDirectory .. "/" .. name .. ".json"
+    end
+
+    local function buildConfig()
+        local themeData = {}
+        for key, value in pairs(theme) do
+            if typeof(value) == "Color3" then
+                themeData[key] = colorToTable(value)
+            end
+        end
+        local flags = {}
+        for flag, entry in pairs(window.Flags) do
+            local ok, value = pcall(entry.Get)
+            if ok and value ~= nil then
+                flags[flag] = value
+            end
+        end
+        return {
+            Version = 1,
+            Theme = themeData,
+            Appearance = {
+                Opacity = window.Opacity,
+                BackgroundImage = window.BackgroundImage or "",
+                BackgroundImageOpacity = window.BackgroundImageOpacity,
+                SizeScale = window.SizeScale,
+            },
+            Flags = flags,
+        }
+    end
+
+    local function applyConfig(data)
+        if type(data.Theme) == "table" then
+            local colors = {}
+            for key, value in pairs(data.Theme) do
+                local color = tableToColor(value)
+                if color then colors[key] = color end
+            end
+            window:SetTheme(colors)
+        end
+
+        local appearance = data.Appearance
+        if type(appearance) == "table" then
+            if tonumber(appearance.Opacity) then
+                window:SetOpacity(appearance.Opacity)
+            end
+            if type(appearance.BackgroundImage) == "string" then
+                window:SetBackgroundImage(appearance.BackgroundImage)
+            end
+            if tonumber(appearance.BackgroundImageOpacity) then
+                window:SetBackgroundImageOpacity(appearance.BackgroundImageOpacity)
+            end
+            if tonumber(appearance.SizeScale) then
+                window:SetSize(appearance.SizeScale * 100)
+            end
+            local controls = window._settingsControls
+            if controls then
+                controls.Opacity:Set(math.floor(window.Opacity * 100 + 0.5))
+                controls.ImageOpacity:Set(math.floor((1 - window.BackgroundImageOpacity) * 100 + 0.5))
+                controls.Size:Set(math.floor(window.SizeScale * 100 + 0.5))
+                controls.Background.Text = window.BackgroundImage or ""
+            end
+        end
+
+        if type(data.Flags) == "table" then
+            for flag, value in pairs(data.Flags) do
+                local entry = window.Flags[flag]
+                if entry then
+                    pcall(entry.Set, value)
+                end
+            end
+        end
+    end
+
+    function window:SaveConfig(name)
+        name = cleanName(name)
+        if name == "" then return false, "Config name is required" end
+        if not HttpService then return false, "HttpService is unavailable" end
+        local okEncode, encoded = pcall(HttpService.JSONEncode, HttpService, buildConfig())
+        if not okEncode then return false, "Could not encode config" end
+        if fileSupport() then
+            ensureFolders()
+            local okWrite, err = pcall(writefile, configPath(name), encoded)
+            if not okWrite then return false, "Could not write file: " .. tostring(err) end
+            return true
+        end
+        memoryConfigs[name] = encoded
+        return true, "Saved in memory only (this executor has no file support)"
+    end
+
+    function window:LoadConfig(name)
+        name = cleanName(name)
+        if name == "" then return false, "Select a config first" end
+        if not HttpService then return false, "HttpService is unavailable" end
+        local raw
+        if fileSupport() then
+            local path = configPath(name)
+            local okExists, exists = pcall(isfile, path)
+            if not (okExists and exists) then return false, "Config not found" end
+            local okRead, content = pcall(readfile, path)
+            if not okRead then return false, "Could not read config" end
+            raw = content
+        else
+            raw = memoryConfigs[name]
+            if not raw then return false, "Config not found" end
+        end
+        local okDecode, data = pcall(HttpService.JSONDecode, HttpService, raw)
+        if not okDecode or type(data) ~= "table" then return false, "Config file is corrupted" end
+        applyConfig(data)
         return true
     end
 
-    function window:LoadTheme(name)
-        local saved = self.SavedThemes[name]
-        if not saved then return false, "Theme not found" end
-        self:SetTheme(saved)
+    function window:DeleteConfig(name)
+        name = cleanName(name)
+        if name == "" then return false, "Select a config first" end
+        if fileSupport() then
+            local path = configPath(name)
+            local okExists, exists = pcall(isfile, path)
+            if not (okExists and exists) then return false, "Config not found" end
+            if typeof(delfile) ~= "function" then return false, "This executor cannot delete files" end
+            local okDelete = pcall(delfile, path)
+            if not okDelete then return false, "Could not delete config" end
+        else
+            if not memoryConfigs[name] then return false, "Config not found" end
+            memoryConfigs[name] = nil
+        end
+        if window:GetAutoload() == name then
+            window:SetAutoload(nil)
+        end
         return true
     end
 
-    function window:RenameTheme(oldName, newName)
-        newName = tostring(newName or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if not self.SavedThemes[oldName] then return false, "Theme not found" end
-        if newName == "" then return false, "New theme name is required" end
-        self.SavedThemes[newName] = self.SavedThemes[oldName]
-        self.SavedThemes[oldName] = nil
+    function window:RenameConfig(oldName, newName)
+        oldName = cleanName(oldName)
+        newName = cleanName(newName)
+        if oldName == "" then return false, "Select a config first" end
+        if newName == "" then return false, "Type the new name in the Config name box" end
+        if oldName == newName then return true end
+        if fileSupport() then
+            local oldPath = configPath(oldName)
+            local okExists, exists = pcall(isfile, oldPath)
+            if not (okExists and exists) then return false, "Config not found" end
+            if typeof(delfile) ~= "function" then return false, "This executor cannot rename files" end
+            local okRead, content = pcall(readfile, oldPath)
+            if not okRead then return false, "Could not read config" end
+            ensureFolders()
+            local okWrite = pcall(writefile, configPath(newName), content)
+            if not okWrite then return false, "Could not write config" end
+            pcall(delfile, oldPath)
+        else
+            if not memoryConfigs[oldName] then return false, "Config not found" end
+            memoryConfigs[newName] = memoryConfigs[oldName]
+            memoryConfigs[oldName] = nil
+        end
+        if window:GetAutoload() == oldName then
+            window:SetAutoload(newName)
+        end
         return true
     end
 
-    function window:DeleteTheme(name)
-        if not self.SavedThemes[name] then return false end
-        self.SavedThemes[name] = nil
-        return true
-    end
-
-    function window:GetSavedThemes()
+    function window:GetConfigs()
         local names = {}
-        for name in pairs(self.SavedThemes) do table.insert(names, name) end
+        if fileSupport() then
+            if typeof(listfiles) == "function" then
+                ensureFolders()
+                local ok, files = pcall(listfiles, configDirectory)
+                if ok and type(files) == "table" then
+                    for _, path in ipairs(files) do
+                        local name = tostring(path):match("([^/\\]+)%.json$")
+                        if name then table.insert(names, name) end
+                    end
+                end
+            end
+        else
+            for name in pairs(memoryConfigs) do
+                table.insert(names, name)
+            end
+        end
         table.sort(names)
         return names
+    end
+
+    function window:SetAutoload(name)
+        name = cleanName(name)
+        if fileSupport() then
+            ensureFolders()
+            local ok = pcall(writefile, autoloadPath, name)
+            return ok
+        end
+        memoryAutoload = name ~= "" and name or nil
+        return true
+    end
+
+    function window:GetAutoload()
+        local name
+        if fileSupport() then
+            local okExists, exists = pcall(isfile, autoloadPath)
+            if okExists and exists then
+                local okRead, content = pcall(readfile, autoloadPath)
+                if okRead then name = cleanName(content) end
+            end
+        else
+            name = memoryAutoload
+        end
+        if name == "" then name = nil end
+        return name
+    end
+
+    function window:LoadAutoload()
+        window._autoloaded = true
+        local name = window:GetAutoload()
+        if not name then return false, "No autoload config set" end
+        local ok, message = window:LoadConfig(name)
+        if ok then
+            window:Notify({
+                Type = "success",
+                Title = "Config loaded",
+                Content = "Autoloaded '" .. name .. "'.",
+            })
+        end
+        return ok, message
     end
 
     function window:Notify(config)
@@ -981,6 +1224,18 @@ function Library:CreateWindow(options)
 
             local sectionApi = {}
 
+            local function registerFlag(kind, config, getter, setter)
+                if window._noFlags or config.Flag == false then return end
+                local base = config.Flag or (tabName .. "/" .. (sectionName or "Section") .. "/" .. tostring(config.Name or kind))
+                local flag = base
+                local suffix = 2
+                while window.Flags[flag] do
+                    flag = base .. " #" .. suffix
+                    suffix = suffix + 1
+                end
+                window.Flags[flag] = {Kind = kind, Get = getter, Set = setter}
+            end
+
             local function makeRow(height)
                 local row = create("Frame", {
                     Size = UDim2.new(1, 0, 0, height or 34),
@@ -1073,6 +1328,7 @@ function Library:CreateWindow(options)
                 track.MouseLeave:Connect(releaseKnob)
                 function api:Set(nextValue) setValue(nextValue, true) end
                 function api:Get() return value end
+                registerFlag("Toggle", config, function() return value end, function(v) api:Set(v == true) end)
                 return api
             end
 
@@ -1172,6 +1428,9 @@ function Library:CreateWindow(options)
                 end)
                 function api:Set(nextValue) setValue(nextValue, true, true) end
                 function api:Get() return value end
+                registerFlag("Slider", config, function() return value end, function(v)
+                    if tonumber(v) then api:Set(tonumber(v)) end
+                end)
                 return api
             end
 
@@ -1198,6 +1457,10 @@ function Library:CreateWindow(options)
                 focusFx(box, theme.Accent)
                 box.FocusLost:Connect(function(enterPressed)
                     if config.Callback then config.Callback(box.Text, enterPressed) end
+                end)
+                registerFlag("Textbox", config, function() return box.Text end, function(v)
+                    box.Text = tostring(v)
+                    if config.Callback then config.Callback(box.Text, false) end
                 end)
                 return box
             end
@@ -1318,6 +1581,7 @@ function Library:CreateWindow(options)
                     if table.find(values, option) then choose(option) end
                 end
                 function api:Get() return selected end
+                registerFlag("Dropdown", config, function() return selected end, function(v) api:Set(v) end)
                 function api:SetOptions(newOptions, defaultOption)
                     values = newOptions or {}
                     selected = defaultOption or values[1]
@@ -1420,6 +1684,10 @@ function Library:CreateWindow(options)
                     if typeof(color) == "Color3" then updateColor(color, true) end
                 end
                 function api:Get() return current end
+                registerFlag("ColorPicker", config, function() return colorToTable(current) end, function(v)
+                    local color = tableToColor(v)
+                    if color then api:Set(color) end
+                end)
                 return api
             end
 
@@ -1467,6 +1735,10 @@ function Library:CreateWindow(options)
                     end
                 end
                 function api:Get() return currentKey end
+                registerFlag("Keybind", config, function() return currentKey.Name end, function(v)
+                    local ok, key = pcall(function() return Enum.KeyCode[v] end)
+                    if ok and key then api:Set(key) end
+                end)
                 return api
             end
 
@@ -1561,6 +1833,7 @@ function Library:CreateWindow(options)
 
         if not window._settingsCreated and tabName ~= "Settings" then
             window._settingsCreated = true
+            window._noFlags = true
             local settingsTab = window:CreateTab({Name = "Settings", Icon = "⚙"})
             local appearance = settingsTab:CreateSection("Appearance")
 
@@ -1648,7 +1921,7 @@ function Library:CreateWindow(options)
                 end,
             })
 
-            appearance:CreateTextbox({
+            local backgroundBox = appearance:CreateTextbox({
                 Name = "Background image",
                 Placeholder = "Image asset ID (optional)",
                 Callback = function(value)
@@ -1656,7 +1929,7 @@ function Library:CreateWindow(options)
                 end,
             })
 
-            appearance:CreateSlider({
+            local imageOpacitySlider = appearance:CreateSlider({
                 Name = "Image opacity",
                 Min = 0,
                 Max = 100,
@@ -1666,7 +1939,7 @@ function Library:CreateWindow(options)
                 end,
             })
 
-            appearance:CreateSlider({
+            local opacitySlider = appearance:CreateSlider({
                 Name = "UI opacity",
                 Min = 0,
                 Max = 80,
@@ -1676,7 +1949,7 @@ function Library:CreateWindow(options)
                 end,
             })
 
-            appearance:CreateSlider({
+            local sizeSlider = appearance:CreateSlider({
                 Name = "UI size",
                 Min = 60,
                 Max = 120,
@@ -1686,64 +1959,124 @@ function Library:CreateWindow(options)
                 end,
             })
 
-            local themeSection = settingsTab:CreateSection("Saved themes")
-            local themeNameBox = themeSection:CreateTextbox({
-                Name = "Theme name",
-                Placeholder = "Name your theme",
+            window._settingsControls = {
+                Opacity = opacitySlider,
+                ImageOpacity = imageOpacitySlider,
+                Size = sizeSlider,
+                Background = backgroundBox,
+            }
+
+            local configSection = settingsTab:CreateSection("Configs")
+            local configNameBox = configSection:CreateTextbox({
+                Name = "Config name",
+                Placeholder = "Name your config",
             })
-            local renameFromBox = themeSection:CreateTextbox({
-                Name = "Rename from",
-                Placeholder = "Existing theme name",
-            })
-            local renameToBox = themeSection:CreateTextbox({
-                Name = "Rename to",
-                Placeholder = "New theme name",
-            })
-            local savedThemeDropdown
-            local function refreshSavedThemeDropdown()
-                local names = window:GetSavedThemes()
-                if #names == 0 then names = {"No saved themes yet"} end
-                if savedThemeDropdown then
-                    savedThemeDropdown:SetOptions(names, names[1])
-                end
+            local selectedConfig
+            local configDropdown
+            local autoloadLabel
+
+            local function refreshConfigs()
+                local names = window:GetConfigs()
+                local keep = selectedConfig and table.find(names, selectedConfig) and selectedConfig or nil
+                selectedConfig = keep or names[1]
+                local shown = #names > 0 and names or {"No configs yet"}
+                configDropdown:SetOptions(shown, selectedConfig or shown[1])
+                autoloadLabel:Set("Autoload: " .. (window:GetAutoload() or "none"))
             end
-            savedThemeDropdown = themeSection:CreateDropdown({
-                Name = "Saved themes",
-                Options = {"No saved themes yet"},
-                Default = "No saved themes yet",
+
+            local function report(ok, message, success)
+                window:Notify({
+                    Type = ok and "success" or "warning",
+                    Title = "Config",
+                    Content = ok and success or message or "Something went wrong.",
+                })
+            end
+
+            configDropdown = configSection:CreateDropdown({
+                Name = "Config list",
+                Options = {"No configs yet"},
+                Default = "No configs yet",
                 Callback = function(name)
-                    if name == "No saved themes yet" then return end
-                    local ok, message = window:LoadTheme(name)
-                    window:Notify({Type = ok and "success" or "error", Title = ok and "Theme loaded" or "Load failed", Content = ok and ("Loaded '" .. name .. "'.") or message})
+                    selectedConfig = name ~= "No configs yet" and name or nil
                 end,
             })
-            themeSection:CreateButton({
-                Name = "Save current theme",
+            configSection:CreateButton({
+                Name = "Create config",
+                ButtonText = "Create",
+                Callback = function()
+                    local name = cleanName(configNameBox.Text)
+                    local ok, message = window:SaveConfig(name)
+                    if ok then selectedConfig = name end
+                    refreshConfigs()
+                    report(ok, message, message or ("Saved '" .. name .. "'."))
+                end,
+            })
+            configSection:CreateButton({
+                Name = "Overwrite selected",
                 ButtonText = "Save",
                 Callback = function()
-                    local ok, message = window:SaveTheme(themeNameBox.Text)
-                    refreshSavedThemeDropdown()
-                    window:Notify({Type = ok and "success" or "warning", Title = ok and "Theme saved" or "Theme not saved", Content = ok and ("Saved '" .. themeNameBox.Text .. "'.") or message})
+                    if not selectedConfig then return report(false, "Select a config first") end
+                    local ok, message = window:SaveConfig(selectedConfig)
+                    report(ok, message, message or ("Saved '" .. selectedConfig .. "'."))
                 end,
             })
-            themeSection:CreateButton({
-                Name = "Delete theme",
-                ButtonText = "Delete",
+            configSection:CreateButton({
+                Name = "Load selected",
+                ButtonText = "Load",
                 Callback = function()
-                    local ok = window:DeleteTheme(themeNameBox.Text)
-                    refreshSavedThemeDropdown()
-                    window:Notify({Type = ok and "success" or "warning", Content = ok and "Theme deleted." or "Theme not found."})
+                    local ok, message = window:LoadConfig(selectedConfig)
+                    report(ok, message, "Loaded '" .. tostring(selectedConfig) .. "'.")
                 end,
             })
-            themeSection:CreateButton({
-                Name = "Rename theme",
+            configSection:CreateButton({
+                Name = "Rename selected",
                 ButtonText = "Rename",
                 Callback = function()
-                    local ok, message = window:RenameTheme(renameFromBox.Text, renameToBox.Text)
-                    refreshSavedThemeDropdown()
-                    window:Notify({Type = ok and "success" or "warning", Content = ok and "Theme renamed." or message})
+                    local newName = cleanName(configNameBox.Text)
+                    local ok, message = window:RenameConfig(selectedConfig, newName)
+                    if ok then selectedConfig = newName end
+                    refreshConfigs()
+                    report(ok, message, "Config renamed.")
                 end,
             })
+            configSection:CreateButton({
+                Name = "Delete selected",
+                ButtonText = "Delete",
+                Callback = function()
+                    local ok, message = window:DeleteConfig(selectedConfig)
+                    if ok then selectedConfig = nil end
+                    refreshConfigs()
+                    report(ok, message, "Config deleted.")
+                end,
+            })
+            configSection:CreateButton({
+                Name = "Refresh list",
+                ButtonText = "Refresh",
+                Callback = refreshConfigs,
+            })
+            configSection:CreateDivider("Autoload")
+            autoloadLabel = configSection:CreateLabel("Autoload: none")
+            configSection:CreateButton({
+                Name = "Set selected as autoload",
+                ButtonText = "Set",
+                Callback = function()
+                    if not selectedConfig then return report(false, "Select a config first") end
+                    local ok = window:SetAutoload(selectedConfig)
+                    refreshConfigs()
+                    report(ok, "Could not save autoload", "Autoload set to '" .. selectedConfig .. "'.")
+                end,
+            })
+            configSection:CreateButton({
+                Name = "Clear autoload",
+                ButtonText = "Clear",
+                Callback = function()
+                    local ok = window:SetAutoload(nil)
+                    refreshConfigs()
+                    report(ok, "Could not clear autoload", "Autoload cleared.")
+                end,
+            })
+            refreshConfigs()
+            window._noFlags = false
             applyResponsiveLayout()
         end
         return tab
@@ -1754,6 +2087,14 @@ function Library:CreateWindow(options)
             self.Destroyed = true
             screenGui:Destroy()
         end
+    end
+
+    if options.AutoLoad ~= false then
+        task.delay(0.6, function()
+            if not window.Destroyed and not window._autoloaded then
+                window:LoadAutoload()
+            end
+        end)
     end
 
     if options.OpenOnCreate == false then
