@@ -19,7 +19,7 @@ local HttpService = getService("HttpService")
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.4.2"
+Library.Version = "0.4.4"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -206,6 +206,19 @@ local function resolveImage(asset)
         end
     end
     return "rbxassetid://" .. image
+end
+
+local function initialsOf(name)
+    local letters = ""
+    for word in string.gmatch(tostring(name or ""), "%w+") do
+        if #letters < 2 then
+            letters = letters .. string.upper(string.sub(word, 1, 1))
+        end
+    end
+    if letters == "" then
+        letters = "F"
+    end
+    return letters
 end
 
 local function colorToTable(color)
@@ -409,21 +422,22 @@ function Library:CreateWindow(options)
         tween(close, 0.2, {TextColor3 = theme.Muted})
     end)
 
+    local reopenText = tostring(options.Initials or initialsOf(options.Name or "fork"))
     local reopen = create("TextButton", {
         Name = "ForkReopen",
-        AnchorPoint = Vector2.new(0, 1),
-        Position = UDim2.new(0, 16, 1, -16),
-        Size = UDim2.fromOffset(48, 48),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0, 62),
+        Size = UDim2.fromOffset(32, 32),
         BackgroundColor3 = theme.Secondary,
-        Text = "f",
+        Text = reopenText,
         TextColor3 = theme.Accent,
-        TextSize = 23,
+        TextSize = #reopenText > 1 and 12 or 15,
         Font = Enum.Font.GothamBold,
         Visible = false,
         AutoButtonColor = false,
         ZIndex = 200,
     }, screenGui)
-    corner(reopen, 14)
+    corner(reopen, 10)
     stroke(reopen, theme.Border)
     local reopenScale = create("UIScale", {Scale = 1}, reopen)
     hoverFx(reopen, function() return theme.Secondary end)
@@ -635,7 +649,39 @@ function Library:CreateWindow(options)
 
     minimize.MouseButton1Click:Connect(hideMain)
     close.MouseButton1Click:Connect(hideMain)
-    reopen.MouseButton1Click:Connect(showMain)
+    local reopenDragging = false
+    local reopenMoved = false
+    local reopenStart, reopenOrigin
+    reopen.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            reopenDragging = true
+            reopenMoved = false
+            reopenStart = input.Position
+            reopenOrigin = reopen.AbsolutePosition + reopen.AbsoluteSize / 2
+        end
+    end)
+    connect(UserInputService.InputChanged, function(input)
+        if reopenDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - reopenStart
+            if not reopenMoved and delta.Magnitude < 6 then return end
+            reopenMoved = true
+            local viewport = screenGui.AbsoluteSize
+            local x = math.clamp(reopenOrigin.X + delta.X, 20, math.max(viewport.X - 20, 20))
+            local y = math.clamp(reopenOrigin.Y + delta.Y, 20, math.max(viewport.Y - 20, 20))
+            reopen.Position = UDim2.fromOffset(x, y)
+        end
+    end)
+    connect(UserInputService.InputEnded, function(input)
+        if reopenDragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            reopenDragging = false
+            if not reopenMoved then
+                showMain()
+            end
+        end
+    end)
 
     function window:SetVisible(visible)
         if visible == true then
