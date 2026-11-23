@@ -21,7 +21,7 @@ local GuiService = getService("GuiService")
 local Library = {}
 Library.__index = Library
 
-Library.Version = "0.7.0"
+Library.Version = "0.7.2"
 
 local DEFAULT_THEME = {
     Background = Color3.fromRGB(15, 16, 22),
@@ -719,6 +719,8 @@ function Library:CreateWindow(options)
     topbar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
+            if window._dragOwner then return end
+            window._dragOwner = "window"
             dragging = true
             dragStart = input.Position
             startPosition = main.Position
@@ -741,7 +743,12 @@ function Library:CreateWindow(options)
     connect(UserInputService.InputEnded, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
+            if dragging then
+                dragging = false
+                if window._dragOwner == "window" then
+                    window._dragOwner = nil
+                end
+            end
         end
     end)
 
@@ -814,6 +821,8 @@ function Library:CreateWindow(options)
     reopen.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
+            if window._dragOwner then return end
+            window._dragOwner = "reopen"
             reopenDragging = true
             reopenMoved = false
             reopenStart = input.Position
@@ -836,6 +845,9 @@ function Library:CreateWindow(options)
         if reopenDragging and (input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch) then
             reopenDragging = false
+            if window._dragOwner == "reopen" then
+                window._dragOwner = nil
+            end
             if not reopenMoved then
                 showMain()
             end
@@ -1614,9 +1626,12 @@ function Library:CreateWindow(options)
 
             local detachable = window.DetachEnabled and sectionConfig.Detachable ~= false
             local floating = false
-            local placeholder, placeholderStroke, holder, dockButton
+            local placeholder, placeholderStroke, holder, floatHeader, floatScroller, floatConnection
+            local sectionStroke = section:FindFirstChildOfClass("UIStroke")
             local grabOffset = Vector2.new(0, 0)
             local floatWidth = tonumber(options.DetachedWidth) or 270
+            local floatMaxHeight = tonumber(options.DetachedHeight) or 150
+            local headerHeight = 28
             local dragState
 
             local function toGui(position, insetY)
@@ -1631,9 +1646,23 @@ function Library:CreateWindow(options)
                     and point.Y >= origin.Y and point.Y <= origin.Y + size.Y
             end
 
+            local function resizeHolder()
+                if not holder or not floatScroller then return end
+                local target = math.min(floatMaxHeight, headerHeight + section.AbsoluteSize.Y + 6)
+                holder.Size = UDim2.fromOffset(floatWidth, target)
+            end
+
             local function dock()
                 if not floating then return end
                 floating = false
+                if floatConnection then
+                    floatConnection:Disconnect()
+                    floatConnection = nil
+                end
+                heading.Visible = true
+                if sectionStroke then
+                    sectionStroke.Enabled = true
+                end
                 section.Parent = page
                 section.LayoutOrder = sectionOrder
                 if placeholder then
@@ -1644,13 +1673,27 @@ function Library:CreateWindow(options)
                 if holder then
                     holder:Destroy()
                     holder = nil
-                end
-                if dockButton then
-                    dockButton.Visible = false
+                    floatHeader = nil
+                    floatScroller = nil
                 end
                 if window.CurrentTab ~= tab then
                     selectTab()
                 end
+            end
+
+            local function beginDrag(input)
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                    and input.UserInputType ~= Enum.UserInputType.Touch then
+                    return
+                end
+                if window._dragOwner then return end
+                window._dragOwner = "section"
+                dragState = {
+                    start = input.Position,
+                    insetY = guiOffsetY(input.Position, floating and floatHeader or heading),
+                    moved = false,
+                    scrolled = false,
+                }
             end
 
             local function detach(point)
@@ -1659,7 +1702,7 @@ function Library:CreateWindow(options)
                 local absolute = section.AbsolutePosition
                 grabOffset = Vector2.new(
                     math.clamp(point.X - absolute.X, 24, floatWidth - 24),
-                    math.clamp(point.Y - absolute.Y, 8, 24)
+                    math.clamp(point.Y - absolute.Y, 8, 20)
                 )
                 placeholder = create("Frame", {
                     Name = "DetachedPlaceholder",
@@ -1676,17 +1719,74 @@ function Library:CreateWindow(options)
                 holder = create("Frame", {
                     Name = (sectionName or "Section") .. "Detached",
                     Position = UDim2.fromOffset(point.X - grabOffset.X, point.Y - grabOffset.Y),
-                    Size = UDim2.fromOffset(floatWidth, 0),
-                    AutomaticSize = Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1,
+                    Size = UDim2.fromOffset(floatWidth, floatMaxHeight),
+                    BackgroundColor3 = theme.Secondary,
+                    BackgroundTransparency = window.Opacity,
                     BorderSizePixel = 0,
+                    ClipsDescendants = true,
+                    Active = true,
                 }, getFloatingRoot())
+                surface(holder)
+                corner(holder, 9)
+                stroke(holder, theme.Border)
                 local popScale = create("UIScale", {Scale = 0.94}, holder)
                 tween(popScale, 0.25, {Scale = 1}, Enum.EasingStyle.Back)
-                section.Parent = holder
-                if dockButton then
-                    dockButton.Visible = true
+
+                floatHeader = create("Frame", {
+                    Name = "Header",
+                    Size = UDim2.new(1, 0, 0, headerHeight),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                }, holder)
+                local headerTitle = makeLabel(floatHeader, sectionName or "Section", 11, theme.Accent, Enum.Font.GothamBold)
+                headerTitle.Position = UDim2.fromOffset(11, 0)
+                headerTitle.Size = UDim2.new(1, -62, 1, 0)
+                headerTitle.TextTruncate = Enum.TextTruncate.AtEnd
+                local headerHandle = create("TextButton", {
+                    Name = "FloatHandle",
+                    Size = UDim2.new(1, -52, 1, 0),
+                    BackgroundTransparency = 1,
+                    Text = "",
+                    ZIndex = 2,
+                }, floatHeader)
+                headerHandle.InputBegan:Connect(beginDrag)
+                local dockButton = create("TextButton", {
+                    Name = "DockButton",
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -8, 0.5, 0),
+                    Size = UDim2.fromOffset(36, 18),
+                    BackgroundColor3 = theme.Tertiary,
+                    Text = "dock",
+                    TextColor3 = theme.Muted,
+                    TextSize = 9,
+                    Font = Enum.Font.GothamMedium,
+                    AutoButtonColor = false,
+                    ZIndex = 3,
+                }, floatHeader)
+                corner(dockButton, 5)
+                hoverFx(dockButton, function() return theme.Tertiary end)
+                dockButton.MouseButton1Click:Connect(dock)
+
+                floatScroller = create("ScrollingFrame", {
+                    Name = "Scroller",
+                    Position = UDim2.fromOffset(0, headerHeight),
+                    Size = UDim2.new(1, 0, 1, -headerHeight),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    CanvasSize = UDim2.new(),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ScrollBarThickness = 2,
+                    ScrollBarImageColor3 = theme.Accent,
+                }, holder)
+                padding(floatScroller, 6, 6, 0, 6)
+
+                heading.Visible = false
+                if sectionStroke then
+                    sectionStroke.Enabled = false
                 end
+                section.Parent = floatScroller
+                floatConnection = section:GetPropertyChangedSignal("AbsoluteSize"):Connect(resizeHolder)
+                resizeHolder()
             end
 
             local function moveHolder(point)
@@ -1712,38 +1812,7 @@ function Library:CreateWindow(options)
                     Text = "",
                     ZIndex = 3,
                 }, heading)
-
-                if detachable then
-                    dockButton = create("TextButton", {
-                        Name = "DockButton",
-                        AnchorPoint = Vector2.new(1, 0.5),
-                        Position = UDim2.new(1, collapsible and -28 or -4, 0.5, 0),
-                        Size = UDim2.fromOffset(34, 16),
-                        BackgroundColor3 = theme.Tertiary,
-                        Text = "dock",
-                        TextColor3 = theme.Muted,
-                        TextSize = 9,
-                        Font = Enum.Font.GothamMedium,
-                        AutoButtonColor = false,
-                        Visible = false,
-                        ZIndex = 4,
-                    }, heading)
-                    corner(dockButton, 5)
-                    hoverFx(dockButton, function() return theme.Tertiary end)
-                    dockButton.MouseButton1Click:Connect(dock)
-                end
-
-                handle.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1
-                        or input.UserInputType == Enum.UserInputType.Touch then
-                        dragState = {
-                            start = input.Position,
-                            insetY = guiOffsetY(input.Position, heading),
-                            moved = false,
-                            scrolled = false,
-                        }
-                    end
-                end)
+                handle.InputBegan:Connect(beginDrag)
 
                 connect(UserInputService.InputChanged, function(input)
                     if not dragState then return end
@@ -1764,7 +1833,7 @@ function Library:CreateWindow(options)
                             local origin = holder.AbsolutePosition
                             grabOffset = Vector2.new(
                                 math.clamp(startPoint.X - origin.X, 0, floatWidth),
-                                math.clamp(startPoint.Y - origin.Y, 0, 40)
+                                math.clamp(startPoint.Y - origin.Y, 0, headerHeight)
                             )
                         else
                             detach(startPoint)
@@ -1785,6 +1854,9 @@ function Library:CreateWindow(options)
                     local state = dragState
                     dragState = nil
                     page.ScrollingEnabled = true
+                    if window._dragOwner == "section" then
+                        window._dragOwner = nil
+                    end
                     if not state.scrolled then
                         setCollapsed(not collapsed)
                         return
@@ -2753,8 +2825,8 @@ function Library:CreateWindow(options)
 
     local watermark = create("Frame", {
         Name = "Watermark",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -12, 0, 8),
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -12, 1, UserInputService.TouchEnabled and -100 or -10),
         Size = UDim2.fromOffset(0, 22),
         AutomaticSize = Enum.AutomaticSize.X,
         BackgroundColor3 = theme.Secondary,
@@ -2765,15 +2837,7 @@ function Library:CreateWindow(options)
     }, screenGui)
     corner(watermark, 6)
     stroke(watermark, theme.Border)
-    padding(watermark, 11, 9, 0, 0)
-    create("Frame", {
-        Name = "WatermarkAccent",
-        Position = UDim2.new(0, -11, 0, 0),
-        Size = UDim2.new(0, 2, 1, 0),
-        BackgroundColor3 = theme.Accent,
-        BorderSizePixel = 0,
-        ZIndex = 31,
-    }, watermark)
+    padding(watermark, 9, 9, 0, 0)
     local watermarkLabel = makeLabel(watermark, "", 11, theme.Text, Enum.Font.GothamMedium)
     watermarkLabel.Size = UDim2.new(0, 0, 1, 0)
     watermarkLabel.AutomaticSize = Enum.AutomaticSize.X
